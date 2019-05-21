@@ -1,13 +1,18 @@
 import json
 import socket, time
 
-routerA = {'IP':'172.18.145.185', 'PORT':30001}
+routerA = {'IP':'172.26.85.30', 'PORT':30001}
 routerB = {'IP':'192.168.43.211', 'PORT':30002}
 routerC = {'IP':'192.168.43.211', 'PORT':30003}
 routerD = {'IP':'192.168.43.211', 'PORT':30004}
 routerE = {'IP':'192.168.43.211', 'PORT':30005}
 router = {'A':routerA, 'B':routerB, 'C':routerC, 'D':routerD, 'E':routerE, }
 
+cost = {'A':{'A':0, 'B':-1, 'C':80, 'D':60,'E':20},
+'B':{'A':-1, 'B':0, 'C':-1, 'D':50, 'E':70},
+'C':{'A':80, 'B':-1, 'C':0, 'D':60, 'E':-1},
+'D':{'A':60, 'B':50, 'C':60, 'D':0, 'E':-1},
+'E':{'A':20, 'B':70, 'C':-1, 'D':-1, 'E':0}}
 
 class Address():
 	def __init__(self, ip, port:int):
@@ -16,6 +21,9 @@ class Address():
 
 	def __eq__(self, another):
 		return self.ip == another.ip and self.port == another.port
+    
+	def __str__(self):
+		return 'IP: ' + str(self.ip) + 'PORT: ' + str(self.port)
 
 
 class Packet():
@@ -58,31 +66,23 @@ class RIP_RoutingTableEntry():
 
 
 
-def addr2name(addr: Address):
+def address_To_name(addr: Address):
 	for nodeName in {'D', 'B', 'C', 'A', 'E'}:  # ...................
-		if addr == name2addr(nodeName):
+		if addr == name_To_address(nodeName):
 			return nodeName
 
 
-def name2addr(name):	
+def name_To_address(name):	
 	return Address(router[name]['IP'],router[name]['PORT'])
 
 
 def get_node_neighbors(name):
-	neighbors = {}
-
-	with open('Cost.txt', 'r') as f:
-		line = ''
-		for i in range(ord(name) - ord('A') + 1):
-			line = f.readline().strip()
-
-		count = 0
-		for n in line.split():
-			if int(n) > 0:
-				neighbors[chr(65 + count)] = (name2addr(chr(65 + count)), int(n))
-			count += 1
-	return neighbors
-
+    neighbors = {}
+    
+    for key in cost[name].keys():
+        if cost[name][key] > 0:
+            neighbors[key] = (name_To_address(key), cost[name][key])
+    return neighbors
 
 class Node():
 	'''
@@ -93,7 +93,7 @@ class Node():
 	'''
 	def __init__(self, name):
 		self.name = name
-		self.address = name2addr(name)
+		self.address = name_To_address(name)
 		self.neighbors = get_node_neighbors(name)
 		
 		self.receiveSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)  #  采用UDP
@@ -120,14 +120,14 @@ class Node():
 			print(i, ' ****** ', self.RIP_routingTable[i])
 
 
-	def send_normal_packet(self, dest:Address, payload, packetType):
+	def send_a_normal_packet(self, dest:Address, payload, packetType):
 		sendpkt = Packet(self.address, dest, payload, packetType)
-		self.forward_normal_packet(sendpkt)
+		self.forward_a_normal_packet(sendpkt)
 
 
-	def forward_normal_packet(self, recvPkt: Packet):
-		packetDest = addr2name(recvPkt.dest)
-		packetSrc = addr2name(recvPkt.src)
+	def forward_a_normal_packet(self, recvPkt: Packet):
+		packetDest = address_To_name(recvPkt.dest)
+		packetSrc = address_To_name(recvPkt.src)
 
 		if packetDest == self.name:
 			self.printOutputMessageHeader()
@@ -139,7 +139,7 @@ class Node():
 				for i in range(len(self.OSPF_forwardingTable)):
 
 					if self.OSPF_forwardingTable[i].dest == packetDest:
-						nextHopAddr = name2addr(self.OSPF_forwardingTable[i].nextHop)
+						nextHopAddr = name_To_address(self.OSPF_forwardingTable[i].nextHop)
 						self.sendSocket.sendto(recvPkt.tojson().encode(), (nextHopAddr.ip, nextHopAddr.port))
 
 						self.printOutputMessageHeader()
@@ -153,7 +153,7 @@ class Node():
 				for i in range(len(self.RIP_routingTable)):
 
 					if self.RIP_routingTable[i].dest == packetDest:
-						nextHopAddr = name2addr(self.RIP_routingTable[i].nextHop)
+						nextHopAddr = name_To_address(self.RIP_routingTable[i].nextHop)
 						self.sendSocket.sendto(recvPkt.tojson().encode(), (nextHopAddr.ip, nextHopAddr.port))
 
 						self.printOutputMessageHeader()
