@@ -1,12 +1,13 @@
 import json
 import socket, time
 
-routerA = {'IP':'172.18.145.185', 'PORT':30001}
+routerA = {'IP':'172.26.85.30', 'PORT':30001}
 routerB = {'IP':'192.168.43.211', 'PORT':30002}
 routerC = {'IP':'192.168.43.211', 'PORT':30003}
 routerD = {'IP':'192.168.43.211', 'PORT':30004}
 routerE = {'IP':'192.168.43.211', 'PORT':30005}
 router = {'A':routerA, 'B':routerB, 'C':routerC, 'D':routerD, 'E':routerE, }
+
 
 class Address():
 	def __init__(self, ip, port:int):
@@ -64,12 +65,7 @@ def address_To_name(addr: Address):
 
 
 def name_To_address(name):	
-	with open(name + '.txt', 'r') as f:
-		f.readline()
-
-		ip = f.readline().strip()   # strip()把末尾的'\n'删掉
-		port = int(f.readline().strip())
-		return Address(ip, port)
+	return Address(router[name]['IP'],router[name]['PORT'])
 
 
 def get_node_neighbors(name):
