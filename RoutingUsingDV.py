@@ -16,50 +16,50 @@ from DataStructure import *
 	lastTimeRecvPktFromNode:dict  # eg: {'A': 1513933432.4340003, 'E': 1513933427.1768813}
 '''
 global lastTimeRecvPktFromNode
+TIMEOUT = 30
 
-
-def send_distance_vector_once(node:Node):
+def send_dv(node:Node):
 	node.printOutputMessageHeader()
-	print('sending DV after updating... ')
+	print('SEND: sending DV after updating... ')
 
 	for n in node.aliveNeighbors:
 
 		if n != node.name:
-			n_addr = name_To_address(n)
+			n_addr = name2addr(n)
 			sendpkt = Packet(node.address, n_addr, node.RIP_routingTable, 1)
 			node.sendSocket.sendto(sendpkt.tojson().encode(), (n_addr.ip, n_addr.port))
 
 
 # 相邻路由器周期性(30s)地交换距离向量
-def send_distance_vector_periodcally(node: Node):
+def send_dv_periodcally(node: Node):
 	while True:
 		node.printOutputMessageHeader()
-		print('sending DV periodcally... ')
+		print('SEND: sending DV periodcally... ')
 		
 		lock.acquire()
 		try:
 			for n in node.neighbors:
 				if n != node.name:
-					n_addr = name_To_address(n)
+					n_addr = name2addr(n)
 					sendpkt = Packet(node.address, n_addr, node.RIP_routingTable, 1)
 					node.sendSocket.sendto(sendpkt.tojson().encode(), (n_addr.ip, n_addr.port))
 		finally:
 			lock.release()
 
-		time.sleep(30)
+		time.sleep(10)
 
 # 启动周期性地交换距离向量的线程
-def start_send_distance_vector_periodcally_thread(node: Node):
-	t = threading.Thread(target=send_distance_vector_periodcally, args=(node,), name='SendDistanceVectorThread')
+def thread_send_dv_periodcally(node: Node):
+	t = threading.Thread(target=send_dv_periodcally, args=(node,), name='thread_send_dv_periodcally')
 	t.start()
 
 
 # 监听是否收到数据包，并处理收到的数据包
-def start_UDP_listener_thread(node: Node):
-	t = threading.Thread(target=handle_receiving_packet, args=(node,), name='UDPListenerThread')
+def thread_listener(node: Node):
+	t = threading.Thread(target=listener, args=(node,), name='thread_listener')#, name='UDPListenerThread')
 	t.start()
 
-def handle_receiving_packet(node: Node):
+def listener(node: Node):
 	while True:
 		data, addr = node.receiveSocket.recvfrom(1024)  # 接收数据
 		recvPkt = Packet()
@@ -67,22 +67,24 @@ def handle_receiving_packet(node: Node):
 
 	
 		if recvPkt.packetType == 0:  # 0表示普通数据包，1表示RIP响应报文数据包,2表示该数据包是一条发送数据包的指令
-			handle_receiving_normal_packet(node, recvPkt)
+			# handle_receiving_normal_packet(node, recvPkt)
+			node.forward_normal_packet(recvPkt)
 		elif recvPkt.packetType == 1:
-			handle_receiving_RIP_distance_vector_packet(node, recvPkt)
+			deal_dv_packet(node, recvPkt)
 		elif recvPkt.packetType == 2:
-			handle_receiving_command_packet(node, recvPkt)
+			# handle_receiving_command_packet(node, recvPkt)
+			node.send_normal_packet(name2addr(recvPkt.payload), 'Hello, I\'m ' + str(node.name) + '.', 0)
 
 
-def handle_receiving_normal_packet(node: Node, recvPkt: Packet):
-	node.forward_a_normal_packet(recvPkt)
+# def handle_receiving_normal_packet(node: Node, recvPkt: Packet):
+# 	node.forward_normal_packet(recvPkt)
 
 
-def handle_receiving_RIP_distance_vector_packet(node: Node, recvPkt: Packet):
-	node_recv_from = address_To_name(recvPkt.src)
+def deal_dv_packet(node: Node, recvPkt: Packet):
+	node_recv_from = addr2name(recvPkt.src)
 
 	node.printOutputMessageHeader()
-	print('receive DV pkt from:', node_recv_from)
+	print('RECEIVE: DV pkt INFORMATION:', node_recv_from)
 
 	lock.acquire()
 	try:
@@ -107,11 +109,11 @@ def handle_receiving_RIP_distance_vector_packet(node: Node, recvPkt: Packet):
 					isInNodeRoutingTable = True
 
 					if recvEntry.hopsToDest < tempTable[j].hopsToDest-1:
-						node.RIP_routingTable[j].nextHop = address_To_name(recvPkt.src)
+						node.RIP_routingTable[j].nextHop = addr2name(recvPkt.src)
 						node.RIP_routingTable[j].hopsToDest = recvEntry.hopsToDest + 1
 						changeRoutingTable = True
 					else:
-						if tempTable[j].nextHop == address_To_name(recvPkt.src):
+						if tempTable[j].nextHop == addr2name(recvPkt.src):
 							if node.RIP_routingTable[j].hopsToDest != recvEntry.hopsToDest + 1:
 								node.RIP_routingTable[j].hopsToDest = recvEntry.hopsToDest + 1
 								changeRoutingTable = True
@@ -135,27 +137,27 @@ def handle_receiving_RIP_distance_vector_packet(node: Node, recvPkt: Packet):
 
 		# 更新本地路由后，向相邻的的alive的节点发送distance vector
 		if changeRoutingTable:
-			send_distance_vector_once(node)
+			send_dv(node)
 
 			# print the new routing table
 			node.printOutputMessageHeader()
-			print('RIP routing table after updating... ')
+			print('UPDATE: Routing table updated. INFORMATION:')
 			node.printRIPRoutingTable()
 
 	finally:
 		lock.release()
 
 
-def handle_receiving_command_packet(node: Node, recvPkt: Packet):
-	node.send_a_normal_packet(name_To_address(recvPkt.payload), 'Hello, I\'m ' + str(node.name) + '.', 0)
+# def handle_receiving_command_packet(node: Node, recvPkt: Packet):
+# 	node.send_normal_packet(name2addr(recvPkt.payload), 'Hello, I\'m ' + str(node.name) + '.', 0)
 
 
-def start_check_neighbor_nodes_alive_periodcally_thread(node: Node):
-	t = threading.Thread(target=check_neighbor_nodes_alive_periodcally, args=(node,), name='CheckNeighborNodesAliveThread')	
+def thread_check_alive(node: Node):
+	t = threading.Thread(target=check_alive, args=(node,), name='thread_check_alive')#, name='CheckNeighborNodesAliveThread')	
 	t.start()
 
 # 周期性地检查其他节点是否down掉
-def check_neighbor_nodes_alive_periodcally(node: Node):
+def check_alive(node: Node):
 	while True:
 		lock.acquire()
 		try:
@@ -165,10 +167,10 @@ def check_neighbor_nodes_alive_periodcally(node: Node):
 			aliveNodes = node.aliveNeighbors.copy()
 
 			for nodeName in aliveNodes:
-				if time.time() - lastTimeRecvPktFromNode[nodeName] > 60:
+				if time.time() - lastTimeRecvPktFromNode[nodeName] > TIMEOUT:
 
 					node.printOutputMessageHeader()
-					print('periodcally check...,', nodeName, 'is down...')
+					print('WARNING: Node out of connect (30s). INFORMATION:', nodeName)
 					node.aliveNeighbors.remove(nodeName)
 
 					
@@ -179,16 +181,16 @@ def check_neighbor_nodes_alive_periodcally(node: Node):
 							node.RIP_routingTable[i].hopsToDest = 16
 
 					# 更新本地路由后，向相邻的的alive的节点发送distance vector
-					send_distance_vector_once(node)
+					send_dv(node)
 					# print the new routing table
 					node.printOutputMessageHeader()
-					print('RIP routing table after updating... ')
+					print('UPDATE: Routing table updated. INFORMATION:')
 					node.printRIPRoutingTable()
 
 		finally:
 			lock.release()
 
-		time.sleep(30)
+		time.sleep(10)
 
 
 
@@ -197,16 +199,15 @@ def check_neighbor_nodes_alive_periodcally(node: Node):
 if __name__ == "__main__":
 	lastTimeRecvPktFromNode = {}
 
-	nodeName = input('Input the name of this router: ')
+	nodeName = input('Name of this router: ')
 	a = Node(nodeName)
-	print('Router info >>> Name:', a.name, ', IP:', a.address.ip, ', ReceivePort:', a.address.port)
-
+	print('ROUTER:', a.name, '[ IP:', a.address.ip, ', ReceivePort:', a.address.port, ']')
 
 	a.RIP_routingTable.append(RIP_RoutingTableEntry(dest=nodeName, nextHop='-', hopsToDest=0))
 	
 	a.aliveNeighbors = set()
 
 	lock = threading.Lock()
-	start_UDP_listener_thread(a)
-	start_check_neighbor_nodes_alive_periodcally_thread(a)
-	start_send_distance_vector_periodcally_thread(a)
+	thread_listener(a)
+	thread_check_alive(a)
+	thread_send_dv_periodcally(a)

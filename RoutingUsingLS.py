@@ -1,13 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May 15 23:04:43 2019
-
-@author: DELL
-"""
-
-# -*- coding:utf-8 -*-
-# 采用开放最短路径优先（OSPF）选路协议
-
 import socket, threading, time
 from DataStructure import *
 
@@ -19,72 +9,61 @@ from DataStructure import *
 '''
 global nodesInTopo, nodesAliveInTopo, edgesInTopo, lastTimeRecvPktFromNode
 
-
+TIMEOUT = 30
 
 # 向所有路由器周期性地广播节点node的链路状态信息
-def broadcast_link_state_periodcally(node: Node):
+def broadcast_link_state(node: Node):
 	while True:
 		node.printOutputMessageHeader()
-		print('broadcasting link state... ')
+		print('SEND: broadcasting link state... ')
 
 		for n in nodesInTopo:
 			if n != node.name:
-				n_addr = name_To_address(n)
+				n_addr = name2addr(n)
 				sendpkt = Packet(node.address, n_addr, node.neighbors, 1)
 				node.sendSocket.sendto(sendpkt.tojson().encode(), (n_addr.ip, n_addr.port))
 
 		time.sleep(10)
 
 # 启动周期性地广播链路状态的线程
-def start_broadcast_link_state_periodcally_thread(node: Node):
-	t = threading.Thread(target=broadcast_link_state_periodcally, args=(node,), name='BroadcastLinkStateThread')
+def thread_broadcast_link_state(node: Node):
+	t = threading.Thread(target=broadcast_link_state, args=(node,), name='thread_broadcast_link_state')#, name='BroadcastLinkStateThread')
 	t.start()
 
 
 # 监听是否收到数据包，并处理收到的数据包
-def start_UDP_listener_thread(node: Node):
-	t = threading.Thread(target=handle_receiving_packet, args=(node,), name='UDPListenerThread')
+def thread_listener(node: Node):
+	t = threading.Thread(target=listener, args=(node,), name='thread_listener')#, name='UDPListenerThread')
 	t.start()
 
-def handle_receiving_packet(node: Node):
+def listener(node: Node):
 	while True:
 		data, addr = node.receiveSocket.recvfrom(1024)  # 接收数据
 		# print('Received from %s:%s.' % addr)
 		recvPkt = Packet()
 		recvPkt.fromjson(bytes.decode(data))
-
 	
 		if recvPkt.packetType == 0:  # 0表示普通数据包，1表示OSPF的链路状态信息数据包,2表示该数据包是一条发送数据包的指令
-			handle_receiving_normal_packet(node, recvPkt)
+			node.forward_normal_packet(recvPkt)
 		elif recvPkt.packetType == 1:
-			handle_receiving_OSPF_link_state_packet(node, recvPkt)
+			deal_link_state_packet(node, recvPkt)
 		elif recvPkt.packetType == 2:
-			handle_receiving_command_packet(node, recvPkt)
+			node.send_normal_packet(name2addr(recvPkt.payload), 'Hello, I\'m ' + str(node.name) + '.', 0)
 
 
-def handle_receiving_command_packet(node: Node, recvPkt: Packet):
-	node.send_a_normal_packet(name_To_address(recvPkt.payload), 'Hello, I\'m ' + str(node.name) + '.', 0)
-
-
-def handle_receiving_normal_packet(node: Node, recvPkt: Packet):
-	node.forward_a_normal_packet(recvPkt)
-
-
-def address_To_name(addr: Address):
+def deal_link_state_packet(node: Node, recvPkt: Packet):
+	addr = recvPkt.src
 	for nodeName in nodesInTopo:
-		if addr == name_To_address(nodeName):
-			return nodeName
-
-
-def handle_receiving_OSPF_link_state_packet(node: Node, recvPkt: Packet):
-	node_recv_from = address_To_name(recvPkt.src)
+		if addr == name2addr(nodeName):
+			node_recv_from = nodeName
+			break
 
 	lock.acquire()
 	try:
 		lastTimeRecvPktFromNode[node_recv_from] = time.time()
 
 		node.printOutputMessageHeader()
-		print('receive OSPF packet from: ', node_recv_from, recvPkt.src.port, recvPkt.packetType)
+		print('RECEIVE: LS packet. FROM: ', node_recv_from, recvPkt.src.port, recvPkt.packetType)
 		
 		nodesAliveInTopo.add(node_recv_from)
 		node.printOutputMessageHeader()
@@ -97,10 +76,10 @@ def handle_receiving_OSPF_link_state_packet(node: Node, recvPkt: Packet):
 	finally:
 		lock.release()
 
-	run_dijkstra_algorithm(node)
+	Dijkstra_algorithm(node)
 
  
-def run_dijkstra_algorithm(node: Node):
+def Dijkstra_algorithm(node: Node):
 	okay = set([node.name])
 	notOkay = nodesAliveInTopo.copy()
 	notOkay.remove(node.name)
@@ -141,7 +120,7 @@ def run_dijkstra_algorithm(node: Node):
 
 	# print the new forwarding table
 	node.printOutputMessageHeader()
-	print('OSPF forwarding table after updating... ')
+	print('UPDATE: Forwarding table updated. INFORTION:')
 	node.printOSPFForwardingTable()
 
 
@@ -164,12 +143,12 @@ def construct_forwarding_table(node: Node, prev_step: dict):
 		node.OSPF_forwardingTable.append(OSPF_ForwardingTableEntry(dest=k, nextHop=next_step_from_current_node[k]))
 
 
-def start_check_nodes_alive_periodcally_thread(node: Node):
-	t = threading.Thread(target=check_nodes_alive_periodcally, args=(node,), name='CheckNodesAliveThread')	
+def thread_check_alive(node: Node):
+	t = threading.Thread(target=check_alive, args=(node,), name='thread_check_alive')#, name='CheckNodesAliveThread')	
 	t.start()
 
 # 周期性地检查其他节点是否down掉
-def check_nodes_alive_periodcally(node: Node):
+def check_alive(node: Node):
 	while True:
 		lock.acquire()
 		try:
@@ -178,11 +157,11 @@ def check_nodes_alive_periodcally(node: Node):
 
 			for nodeName in aliveNodes:
 				if nodeName != node.name:
-					if time.time() - lastTimeRecvPktFromNode[nodeName] > 30:
+					if time.time() - lastTimeRecvPktFromNode[nodeName] > TIMEOUT:
 						nodesAliveInTopo.remove(nodeName)
 						node.printOutputMessageHeader()
-						print('periodcally check...,', nodeName, 'is down...')
-						run_dijkstra_algorithm(node)
+						print('WARNING: Node out of connect (30s). INFORMATION:', nodeName)
+						Dijkstra_algorithm(node)
 		finally:
 			lock.release()
 
@@ -199,9 +178,9 @@ if __name__ == "__main__":
 	edgesInTopo = {}
 	lastTimeRecvPktFromNode = {}
 
-	nodeName = input('Input the name of this router: ')
+	nodeName = input('Name of this router: ')
 	a = Node(nodeName)
-	print('Router info >>> Name:', a.name, ', IP:', a.address.ip, ', ReceivePort:', a.address.port)
+	print('Router:', a.name, '[ IP:', a.address.ip, ', ReceivePort:', a.address.port, ']')
 
 	nodesAliveInTopo.add(nodeName)
 	edgesInTopo[nodeName] = {}
@@ -212,6 +191,6 @@ if __name__ == "__main__":
 	lock = threading.Lock()
 
 
-	start_broadcast_link_state_periodcally_thread(a)
-	start_UDP_listener_thread(a)
-	start_check_nodes_alive_periodcally_thread(a)
+	thread_broadcast_link_state(a)
+	thread_listener(a)
+	thread_check_alive(a)
