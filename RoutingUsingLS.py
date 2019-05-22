@@ -14,7 +14,7 @@ TIMEOUT = 30
 # 向所有路由器周期性地广播节点node的链路状态信息
 def broadcast_link_state(node: Node):
 	while True:
-		node.printOutputMessageHeader()
+		node.print_Node_Header()
 		print('SEND: broadcasting link state... ')
 
 		for n in nodesInTopo:
@@ -62,11 +62,11 @@ def deal_link_state_packet(node: Node, recvPkt: Packet):
 	try:
 		lastTimeRecvPktFromNode[node_recv_from] = time.time()
 
-		node.printOutputMessageHeader()
+		node.print_Node_Header()
 		print('RECEIVE: LS packet. FROM: ', node_recv_from, recvPkt.src.port, recvPkt.packetType)
 		
 		nodesAliveInTopo.add(node_recv_from)
-		node.printOutputMessageHeader()
+		node.print_Node_Header()
 		print('alive nodes: ', nodesAliveInTopo)
 
 	
@@ -119,9 +119,9 @@ def Dijkstra_algorithm(node: Node):
 	construct_forwarding_table(node, prev_step)
 
 	# print the new forwarding table
-	node.printOutputMessageHeader()
+	node.print_Node_Header()
 	print('UPDATE: Forwarding table updated. INFORTION:')
-	node.printOSPFForwardingTable()
+	node.print_LS_forwardingTable()
 
 
 
@@ -138,9 +138,9 @@ def construct_forwarding_table(node: Node, prev_step: dict):
 				temp = prev_step[temp]
 			next_step_from_current_node[x] = temp
 
-	node.OSPF_forwardingTable.clear()
+	node.LS_forwardingTable.clear()
 	for k in next_step_from_current_node.keys():
-		node.OSPF_forwardingTable.append(OSPF_ForwardingTableEntry(dest=k, nextHop=next_step_from_current_node[k]))
+		node.LS_forwardingTable.append(LS_forwardingTableEntry(dest=k, nextHop=next_step_from_current_node[k]))
 
 
 def thread_check_alive(node: Node):
@@ -159,7 +159,7 @@ def check_alive(node: Node):
 				if nodeName != node.name:
 					if time.time() - lastTimeRecvPktFromNode[nodeName] > TIMEOUT:
 						nodesAliveInTopo.remove(nodeName)
-						node.printOutputMessageHeader()
+						node.print_Node_Header()
 						print('WARNING: Node out of connect (30s). INFORMATION:', nodeName)
 						Dijkstra_algorithm(node)
 		finally:

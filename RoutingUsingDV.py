@@ -19,21 +19,21 @@ global lastTimeRecvPktFromNode
 TIMEOUT = 30
 
 def send_dv(node:Node):
-	node.printOutputMessageHeader()
+	node.print_Node_Header()
 	print('SEND: sending DV after updating... ')
 
 	for n in node.aliveNeighbors:
 
 		if n != node.name:
 			n_addr = name2addr(n)
-			sendpkt = Packet(node.address, n_addr, node.RIP_routingTable, 1)
+			sendpkt = Packet(node.address, n_addr, node.DV_forwardingTable, 1)
 			node.sendSocket.sendto(sendpkt.tojson().encode(), (n_addr.ip, n_addr.port))
 
 
 # 相邻路由器周期性(30s)地交换距离向量
 def send_dv_periodcally(node: Node):
 	while True:
-		node.printOutputMessageHeader()
+		node.print_Node_Header()
 		print('SEND: sending DV periodcally... ')
 		
 		lock.acquire()
@@ -41,7 +41,7 @@ def send_dv_periodcally(node: Node):
 			for n in node.neighbors:
 				if n != node.name:
 					n_addr = name2addr(n)
-					sendpkt = Packet(node.address, n_addr, node.RIP_routingTable, 1)
+					sendpkt = Packet(node.address, n_addr, node.DV_forwardingTable, 1)
 					node.sendSocket.sendto(sendpkt.tojson().encode(), (n_addr.ip, n_addr.port))
 		finally:
 			lock.release()
@@ -83,7 +83,7 @@ def listener(node: Node):
 def deal_dv_packet(node: Node, recvPkt: Packet):
 	node_recv_from = addr2name(recvPkt.src)
 
-	node.printOutputMessageHeader()
+	node.print_Node_Header()
 	print('RECEIVE: DV pkt INFORMATION:', node_recv_from)
 
 	lock.acquire()
@@ -94,13 +94,13 @@ def deal_dv_packet(node: Node, recvPkt: Packet):
 
 		lastTimeRecvPktFromNode[node_recv_from] = time.time()
 
-		tempTable = node.RIP_routingTable.copy()
+		tempTable = node.DV_forwardingTable.copy()
 		changeRoutingTable = False
 
 		# 合并节点自己的RIP表和收到的RIP表
 		for i in range(len(recvPkt.payload)):
 			isInNodeRoutingTable = False
-			recvEntry = RIP_RoutingTableEntry(recvPkt.payload[i]['dest'], recvPkt.payload[i]['nextHop'], recvPkt.payload[i]['hopsToDest'])
+			recvEntry = DV_forwardingTableEntry(recvPkt.payload[i]['dest'], recvPkt.payload[i]['nextHop'], recvPkt.payload[i]['hopsToDest'])
 
 			for j in range(len(tempTable)):
 				
@@ -109,17 +109,17 @@ def deal_dv_packet(node: Node, recvPkt: Packet):
 					isInNodeRoutingTable = True
 
 					if recvEntry.hopsToDest < tempTable[j].hopsToDest-1:
-						node.RIP_routingTable[j].nextHop = addr2name(recvPkt.src)
-						node.RIP_routingTable[j].hopsToDest = recvEntry.hopsToDest + 1
+						node.DV_forwardingTable[j].nextHop = addr2name(recvPkt.src)
+						node.DV_forwardingTable[j].hopsToDest = recvEntry.hopsToDest + 1
 						changeRoutingTable = True
 					else:
 						if tempTable[j].nextHop == addr2name(recvPkt.src):
-							if node.RIP_routingTable[j].hopsToDest != recvEntry.hopsToDest + 1:
-								node.RIP_routingTable[j].hopsToDest = recvEntry.hopsToDest + 1
+							if node.DV_forwardingTable[j].hopsToDest != recvEntry.hopsToDest + 1:
+								node.DV_forwardingTable[j].hopsToDest = recvEntry.hopsToDest + 1
 								changeRoutingTable = True
 								
-								if node.RIP_routingTable[j].hopsToDest > 16:
-									node.RIP_routingTable[j].hopsToDest = 16
+								if node.DV_forwardingTable[j].hopsToDest > 16:
+									node.DV_forwardingTable[j].hopsToDest = 16
 
 								
 
@@ -131,7 +131,7 @@ def deal_dv_packet(node: Node, recvPkt: Packet):
 				if recvEntry.hopsToDest > 16:
 					recvEntry.hopsToDest = 16
 
-				node.RIP_routingTable.append(recvEntry)
+				node.DV_forwardingTable.append(recvEntry)
 				changeRoutingTable = True
 
 
@@ -140,9 +140,9 @@ def deal_dv_packet(node: Node, recvPkt: Packet):
 			send_dv(node)
 
 			# print the new routing table
-			node.printOutputMessageHeader()
+			node.print_Node_Header()
 			print('UPDATE: Routing table updated. INFORMATION:')
-			node.printRIPRoutingTable()
+			node.print_DV_forwardingTable()
 
 	finally:
 		lock.release()
@@ -161,7 +161,7 @@ def check_alive(node: Node):
 	while True:
 		lock.acquire()
 		try:
-			# node.printOutputMessageHeader()
+			# node.print_Node_Header()
 			# print('periodcally check..., alive neighbors:', node.aliveNeighbors)
 
 			aliveNodes = node.aliveNeighbors.copy()
@@ -169,23 +169,23 @@ def check_alive(node: Node):
 			for nodeName in aliveNodes:
 				if time.time() - lastTimeRecvPktFromNode[nodeName] > TIMEOUT:
 
-					node.printOutputMessageHeader()
+					node.print_Node_Header()
 					print('WARNING: Node out of connect (30s). INFORMATION:', nodeName)
 					node.aliveNeighbors.remove(nodeName)
 
 					
 					# 采用 "毒性反转" 解决路由环路
 					#  当一条路径信息变为无效之后，路由器并不立即将它从路由表中删除，而是用16，即不可达的度量值将它广播出去。
-					for i in range(len(node.RIP_routingTable)):
-						if node.RIP_routingTable[i].dest == nodeName or node.RIP_routingTable[i].nextHop == nodeName:
-							node.RIP_routingTable[i].hopsToDest = 16
+					for i in range(len(node.DV_forwardingTable)):
+						if node.DV_forwardingTable[i].dest == nodeName or node.DV_forwardingTable[i].nextHop == nodeName:
+							node.DV_forwardingTable[i].hopsToDest = 16
 
 					# 更新本地路由后，向相邻的的alive的节点发送distance vector
 					send_dv(node)
 					# print the new routing table
-					node.printOutputMessageHeader()
+					node.print_Node_Header()
 					print('UPDATE: Routing table updated. INFORMATION:')
-					node.printRIPRoutingTable()
+					node.print_DV_forwardingTable()
 
 		finally:
 			lock.release()
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 	a = Node(nodeName)
 	print('ROUTER:', a.name, '[ IP:', a.address.ip, ', ReceivePort:', a.address.port, ']')
 
-	a.RIP_routingTable.append(RIP_RoutingTableEntry(dest=nodeName, nextHop='-', hopsToDest=0))
+	a.DV_forwardingTable.append(DV_forwardingTableEntry(dest=nodeName, nextHop='-', hopsToDest=0))
 	
 	a.aliveNeighbors = set()
 
